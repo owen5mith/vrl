@@ -1,8 +1,20 @@
 use crate::compiler::prelude::*;
 
-fn encode_json(value: Value) -> Resolved {
+fn encode_json(value: Value, pretty: Option<Value>) -> Resolved {
+
+    let pretty = match pretty {
+        Some(expr) => expr.try_boolean()?,
+        None => false,
+    };
+
+    let encode_func = match pretty {
+        true => serde_json::to_string,
+        false => serde_json::to_string
+    };
+    
+
     // With `vrl::Value` it should not be possible to get `Err`.
-    match serde_json::to_string(&value) {
+    match encode_func(&value) {
         Ok(value) => Ok(value.into()),
         Err(error) => unreachable!("unable encode to json: {}", error),
     }
@@ -21,6 +33,11 @@ impl Function for EncodeJson {
             keyword: "value",
             kind: kind::ANY,
             required: true,
+        },
+        Parameter {
+            keyword: "pretty",
+            kind: kind::BOOLEAN,
+            required: false,
         }]
     }
 
@@ -31,8 +48,9 @@ impl Function for EncodeJson {
         arguments: ArgumentList,
     ) -> Compiled {
         let value = arguments.required("value");
+        let pretty = arguments.optional("pretty");
 
-        Ok(EncodeJsonFn { value }.as_expr())
+        Ok(EncodeJsonFn { value , pretty }.as_expr())
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -47,12 +65,21 @@ impl Function for EncodeJson {
 #[derive(Clone, Debug)]
 struct EncodeJsonFn {
     value: Box<dyn Expression>,
+    pretty: Option<Box<dyn Expression>>,
 }
 
 impl FunctionExpression for EncodeJsonFn {
     fn resolve(&self, ctx: &mut Context) -> Resolved {
+        let pretty = self
+            .pretty
+            .as_ref()
+            .map(|expr| expr.resolve(ctx))
+            .transpose()?;
+
         let value = self.value.resolve(ctx)?;
-        encode_json(value)
+
+
+        encode_json(value, pretty)
     }
 
     fn type_def(&self, _: &state::TypeState) -> TypeDef {
